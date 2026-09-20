@@ -1,7 +1,7 @@
 {
     "name": "Chain Explorer",
     "module": "explorer",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "For STN Chain, the STN Chain Explorer module.",
     "update_url": "https://poemei.com/projetcs/modules/explorer/module.json",
     "creator": "PM",
@@ -17,19 +17,25 @@
     "database_tables": [
         "explorer_transactions",
         "explorer_blocks",
-        "explorer_state"
+        "explorer_state",
+        "explorer_settings"
     ],
     "files": [
         "controllers/explorer.php",
         "models/explorer_model.php",
         "libraries/stnc_client.php",
+        "libraries/explorer_status.php",
         "views/admin/explorer.php",
         "views/index.php",
         "sql/schema.sql",
         "sql/patches/.gitkeep",
+        "sql/patches/1.0.0-to-1.1.0.sql",
         "docs/CHANGELOG.md",
         "docs/STNC.md"
     ],
+    "migrations": {
+        "1.0.0-to-1.1.0": "sql/patches/1.0.0-to-1.1.0.sql"
+    },
     "routes": [
         "index"
     ]

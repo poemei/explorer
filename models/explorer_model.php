@@ -12,11 +12,12 @@ final class explorer_model extends model
 
     public function databaseState(): string
     {
+        $present = 0;
         foreach (self::TABLES as $table) {
-            if (!$this->tableExists($table)) {
-                return 'missing';
-            }
+            if ($this->tableExists($table)) { ++$present; }
         }
+        if ($present === 0 && !$this->tableExists('explorer_settings')) { return 'missing'; }
+        if ($present !== count(self::TABLES)) { return 'invalid'; }
 
         $current = $this->schemaVersion();
         $target = $this->targetVersion();
@@ -25,7 +26,7 @@ final class explorer_model extends model
             return 'invalid';
         }
         if ($current === $target) {
-            return 'current';
+            return $this->tableExists('explorer_settings') ? 'current' : 'invalid';
         }
 
         return $this->patchFile($current, $target) !== null
@@ -35,24 +36,10 @@ final class explorer_model extends model
 
     public function installSchema(): void
     {
-        $this->executeSqlFile(__DIR__ . '/../sql/schema.sql');
-    }
-
-    public function updateSchema(): void
-    {
-        $current = $this->schemaVersion();
-        $target = $this->targetVersion();
-        $patch = $current === null ? null : $this->patchFile($current, $target);
-
-        if ($patch === null) {
-            throw new RuntimeException('No valid schema migration path exists.');
+        if ($this->databaseState() !== 'missing') {
+            throw new RuntimeException('Fresh installation requires an absent module schema.');
         }
-
-        $this->executeSqlFile($patch);
-        $this->query(
-            'UPDATE `' . self::STATE_TABLE . '` SET `schema_version` = :version WHERE `id` = 1',
-            ['version' => $target]
-        );
+        $this->executeSqlFile(__DIR__ . '/../sql/schema.sql');
     }
 
     public function deleteData(): void
@@ -60,6 +47,49 @@ final class explorer_model extends model
         $this->query('DELETE FROM `explorer_state`');
         $this->query('DELETE FROM `explorer_blocks`');
         $this->query('DELETE FROM `explorer_transactions` WHERE `id` <> 1');
+    }
+
+    public function configuration(): array
+    {
+        $row = $this->fetch('SELECT `primary_ip`, `primary_port`, `secondary_ip`, `secondary_port` FROM `explorer_settings` WHERE `id` = 1');
+        return is_array($row) ? $row : [];
+    }
+
+    public function saveConfiguration(array $input): void
+    {
+        $values = [];
+        foreach (['primary', 'secondary'] as $name) {
+            $ip = is_string($input[$name . '_ip'] ?? null) ? trim($input[$name . '_ip']) : '';
+            $port = $input[$name . '_port'] ?? '';
+            if ($name === 'secondary' && $ip === '' && ($port === '' || $port === null)) {
+                $values[$name . '_ip'] = null;
+                $values[$name . '_port'] = null;
+                continue;
+            }
+            if (filter_var($ip, FILTER_VALIDATE_IP) === false
+                || filter_var($port, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 65535]]) === false) {
+                throw new InvalidArgumentException('Enter a valid ' . $name . ' IP address and port (1–65535).');
+            }
+            $values[$name . '_ip'] = $ip;
+            $values[$name . '_port'] = (int) $port;
+        }
+        $this->query('INSERT INTO `explorer_settings` (`id`, `primary_ip`, `primary_port`, `secondary_ip`, `secondary_port`) '
+            . 'VALUES (1, :primary_ip, :primary_port, :secondary_ip, :secondary_port) ON DUPLICATE KEY UPDATE '
+            . '`primary_ip` = VALUES(`primary_ip`), `primary_port` = VALUES(`primary_port`), '
+            . '`secondary_ip` = VALUES(`secondary_ip`), `secondary_port` = VALUES(`secondary_port`)', $values);
+    }
+
+    public function chainStatus(string $schema): array
+    {
+        if ($schema !== 'current') {
+            return ['state' => 'unconfigured', 'message' => 'Blockchain not configured.'];
+        }
+        $configuration = $this->configuration();
+        if (empty($configuration['primary_ip'])) {
+            return ['state' => 'unconfigured', 'message' => 'Blockchain not configured.'];
+        }
+        require_once __DIR__ . '/../libraries/explorer_status.php';
+        return explorer_status::load($configuration);
     }
 
     private function schemaVersion(): ?string

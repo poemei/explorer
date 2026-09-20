@@ -1,16 +1,23 @@
 # STNC transport foundation
 
 The Explorer reads Chain through STNC. Chain remains the authority for accepted
-state. This increment supplies a PHP transport library and loopback qualification;
-it does not yet connect the existing page or database scaffold to Chain.
+state. The transport library supplies validated INFO responses to the module's
+status adapter, which connects the public/admin pages to configured Chain nodes.
 
 ## Current scope
 
 `libraries/stnc_client.php` exposes only `getChainInfo()`, a read-only method-1
 request. Its response contains the numeric Chain `status`, a hexadecimal
 `request_id`, and the opaque binary `payload`. Successful INFO payloads are exactly
-184 bytes; statuses 1 through 10 carry no payload. Presentation/model decoding is
-not part of this increment.
+184 bytes; statuses 1 through 10 carry no payload. `explorer_status.php` decodes
+INFO for display without native unsigned 64-bit conversion. Height and count use
+exact decimal strings; target and the full 320-bit work value use hexadecimal.
+
+Admin saves numeric primary/fallback IPs and ports in `explorer_settings` through
+the module model. A valid INFO success is used from the primary, otherwise the
+optional fallback is queried. No cross-node consistency or network matching is
+inferred: operators must configure nodes on the intended network. The displayed
+network/genesis IDs identify the responding node's Chain. No response is cached.
 
 The existing Chain source (`includes/stn_rpc.h` and `src/stn_rpc.c`) controls the
 wire layout: `STNC`, version **2**, request/response kind, method, status, 8-byte
