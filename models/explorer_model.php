@@ -179,14 +179,18 @@ final class explorer_model extends model
         require_once __DIR__ . '/../libraries/stratum_status.php';
 
         try {
-            return stratum_status::load([
-                'host' => $host,
-                'port' => (int) $port,
-            ]);
+            return stratum_status::load(
+                $host,
+                (int) $port
+            );
         } catch (Throwable $exception) {
             return [
                 'state' => 'unavailable',
                 'message' => 'Stratum status is temporarily unavailable.',
+                'diagnostics' => [
+                    'result' => 'exception',
+                    'detail' => $exception->getMessage(),
+                ],
             ];
         }
     }
