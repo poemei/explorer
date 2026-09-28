@@ -1,12 +1,6 @@
-CREATE TABLE IF NOT EXISTS `explorer_schema` (
- `id` TINYINT UNSIGNED NOT NULL,
- `schema_version` VARCHAR(64) NOT NULL,
- `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
- PRIMARY KEY (`id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 CREATE TABLE IF NOT EXISTS `explorer_transactions` (
  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+ `schema_version` VARCHAR(64) NULL,
  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
  PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -33,16 +27,25 @@ CREATE TABLE IF NOT EXISTS `explorer_state` (
 
 CREATE TABLE IF NOT EXISTS `explorer_settings` (
  `id` TINYINT UNSIGNED NOT NULL,
- `primary_ip` VARCHAR(45) NOT NULL,
- `primary_port` SMALLINT UNSIGNED NOT NULL,
+ `primary_ip` VARCHAR(45) NOT NULL DEFAULT '',
+ `primary_port` SMALLINT UNSIGNED NOT NULL DEFAULT 18473,
  `secondary_ip` VARCHAR(45) NULL,
  `secondary_port` SMALLINT UNSIGNED NULL,
+ `stratum_host` VARCHAR(255) NULL,
+ `stratum_port` SMALLINT UNSIGNED NULL,
  PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO `explorer_schema`
+INSERT INTO `explorer_settings`
+ (`id`, `primary_ip`, `primary_port`)
+VALUES
+ (1, '', 18473)
+ON DUPLICATE KEY UPDATE
+ `id` = VALUES(`id`);
+
+INSERT INTO `explorer_transactions`
  (`id`, `schema_version`)
 VALUES
- (1, '1.2.0')
+ (1, '1.1.0')
 ON DUPLICATE KEY UPDATE
  `schema_version` = VALUES(`schema_version`);
