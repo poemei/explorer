@@ -18,8 +18,8 @@ final class stnc_client
     public function __construct(
         string $address,
         int $port,
-        private readonly float $connectTimeout = 2.0,
-        private readonly float $operationTimeout = 5.0
+        private readonly float $connectTimeout = 0.5,
+        private readonly float $operationTimeout = 1.0
     ) {
         if (filter_var($address, FILTER_VALIDATE_IP) === false || $port < 1 || $port > 65535
             || !is_finite($connectTimeout) || $connectTimeout <= 0 || $connectTimeout > 60
