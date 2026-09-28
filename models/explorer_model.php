@@ -19,17 +19,44 @@ final class explorer_model extends model
         foreach (self::TABLES as $table) {
             if ($this->tableExists($table)) { ++$present; }
         }
-        if ($present === 0 && !$this->tableExists('explorer_settings')) { return 'missing'; }
-        if ($present !== count(self::TABLES)) { return 'invalid'; }
 
-        $current = $this->schemaVersion();
+        $settingsPresent = $this->tableExists('explorer_settings');
+
+        if ($present === 0 && !$settingsPresent) {
+            return 'missing';
+        }
+
         $target = $this->targetVersion();
-
-        if ($current === null || $target === '') {
+        if ($target === '') {
             return 'invalid';
         }
+
+        /*
+         * Explorer 1.0.0 installations predate the complete 1.1.0 schema.
+         * If the legacy transaction table exists, the declared 1.0.0 ->
+         * current migration is the authoritative recovery/update path even
+         * when later-owned tables have not yet been created.
+         */
+        if (
+            $this->tableExists(self::STATE_TABLE)
+            && !$this->columnExists(self::STATE_TABLE, 'schema_version')
+        ) {
+            return $this->patchFile('1.0.0', $target) !== null
+                ? 'update'
+                : 'invalid';
+        }
+
+        if ($present !== count(self::TABLES)) {
+            return 'invalid';
+        }
+
+        $current = $this->schemaVersion();
+        if ($current === null) {
+            return 'invalid';
+        }
+
         if ($current === $target) {
-            return $this->tableExists('explorer_settings') ? 'current' : 'invalid';
+            return $settingsPresent ? 'current' : 'invalid';
         }
 
         return $this->patchFile($current, $target) !== null
@@ -241,9 +268,7 @@ final class explorer_model extends model
     private function schemaVersion(): ?string
     {
         if (!$this->columnExists(self::STATE_TABLE, 'schema_version')) {
-            return $this->tableExists('explorer_settings')
-                ? $this->targetVersion()
-                : '1.0.0';
+            return '1.0.0';
         }
 
         $row = $this->fetch(
