@@ -10,6 +10,9 @@ final class explorer_model extends model
     ];
     private const STATE_TABLE = 'explorer_transactions';
 
+    /** @var array<string,array>|null */
+    private static ?array $requestStatusCache = null;
+
     public function databaseState(): string
     {
         $present = 0;
@@ -77,6 +80,7 @@ final class explorer_model extends model
             . 'VALUES (1, :primary_ip, :primary_port, :secondary_ip, :secondary_port) ON DUPLICATE KEY UPDATE '
             . '`primary_ip` = VALUES(`primary_ip`), `primary_port` = VALUES(`primary_port`), '
             . '`secondary_ip` = VALUES(`secondary_ip`), `secondary_port` = VALUES(`secondary_port`)', $values);
+        self::$requestStatusCache = null;
     }
 
     public function chainStatus(string $schema): array
@@ -88,8 +92,78 @@ final class explorer_model extends model
         if (empty($configuration['primary_ip'])) {
             return ['state' => 'unconfigured', 'message' => 'Blockchain not configured.'];
         }
+
+        $cacheKey = json_encode($configuration);
+        if (is_string($cacheKey) && isset(self::$requestStatusCache[$cacheKey])) {
+            return self::$requestStatusCache[$cacheKey];
+        }
+
         require_once __DIR__ . '/../libraries/explorer_status.php';
-        return explorer_status::load($configuration);
+        $status = explorer_status::load($configuration);
+
+        if (is_string($cacheKey)) {
+            if (self::$requestStatusCache === null) {
+                self::$requestStatusCache = [];
+            }
+            self::$requestStatusCache[$cacheKey] = $status;
+        }
+
+        return $status;
+    }
+
+    /**
+     * Bounded status contract consumed by the Home module.
+     * Observation failure is represented as unavailable, never as proof that
+     * STN Chain itself is offline.
+     */
+    public function homeStatus(): array
+    {
+        $status = $this->chainStatus($this->databaseState());
+        if (($status['state'] ?? '') !== 'online' || !is_array($status['info'] ?? null)) {
+            return [
+                'available' => false,
+                'state' => (string) ($status['state'] ?? 'unavailable'),
+                'message' => (string) ($status['message'] ?? 'Blockchain status is temporarily unavailable.'),
+                'height' => null,
+                'block_count' => null,
+                'mining' => ['available' => false],
+            ];
+        }
+
+        $info = $status['info'];
+        return [
+            'available' => true,
+            'state' => 'online',
+            'message' => (string) ($status['message'] ?? 'Blockchain connected.'),
+            'height' => isset($info['Chain height']) ? (string) $info['Chain height'] : null,
+            'block_count' => isset($info['Stored block count']) ? (string) $info['Stored block count'] : null,
+            'mining' => ['available' => false],
+        ];
+    }
+
+    /**
+     * Return the latest observed Chain tip without opening a second connection
+     * when homeStatus() has already observed INFO during this request.
+     */
+    public function latestBlock(): array
+    {
+        $status = $this->chainStatus($this->databaseState());
+        if (($status['state'] ?? '') !== 'online' || !is_array($status['info'] ?? null)) {
+            return ['available' => false];
+        }
+
+        $blockId = strtolower(trim((string) ($status['info']['Tip block ID'] ?? '')));
+        if (preg_match('/^[0-9a-f]{64}$/', $blockId) !== 1) {
+            return ['available' => false];
+        }
+
+        return [
+            'available' => true,
+            'block_id' => $blockId,
+            'height' => isset($status['info']['Chain height'])
+                ? (string) $status['info']['Chain height']
+                : null,
+        ];
     }
 
     private function schemaVersion(): ?string
