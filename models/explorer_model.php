@@ -168,6 +168,17 @@ final class explorer_model extends model
 
     private function schemaVersion(): ?string
     {
+        /*
+         * Explorer 1.0 deployments predate the schema_version column.
+         * Never query a column until its presence has been established: doing
+         * so turns a normal module migration state into a PDO exception.
+         */
+        if (!$this->columnExists(self::STATE_TABLE, 'schema_version')) {
+            return $this->tableExists('explorer_settings')
+                ? $this->targetVersion()
+                : '1.0.0';
+        }
+
         $row = $this->fetch(
             'SELECT `schema_version` FROM `' . self::STATE_TABLE . '` WHERE `id` = 1 LIMIT 1'
         );
@@ -219,6 +230,20 @@ final class explorer_model extends model
             'SELECT 1 FROM information_schema.tables '
             . 'WHERE table_schema = :schema AND table_name = :table_name LIMIT 1',
             ['schema' => DB_NAME, 'table_name' => $table]
+        );
+    }
+
+    private function columnExists(string $table, string $column): bool
+    {
+        return (bool) $this->fetch(
+            'SELECT 1 FROM information_schema.columns '
+            . 'WHERE table_schema = :schema AND table_name = :table_name '
+            . 'AND column_name = :column_name LIMIT 1',
+            [
+                'schema' => DB_NAME,
+                'table_name' => $table,
+                'column_name' => $column,
+            ]
         );
     }
 }

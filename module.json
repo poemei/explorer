@@ -37,6 +37,8 @@
         "1.0.0-to-1.1.0": "sql/patches/1.0.0-to-1.1.0.sql"
     },
     "routes": [
-        "index"
+        "index",
+		"blocks",
+		"block"
     ]
 }
