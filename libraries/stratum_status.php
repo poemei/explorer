@@ -13,7 +13,7 @@ final class stratum_status
     private const EXPECTED_SERVICE = 'STN-Stratum';
     private const STATUS_PATH = '/status';
     private const CONNECT_TIMEOUT = 1.0;
-    private const READ_TIMEOUT_SECONDS = 2;
+    private const READ_TIMEOUT_SECONDS = 3;
     private const MAX_RESPONSE_BYTES = 16384;
     private const MAX_HEADER_BYTES = 8192;
 
@@ -24,7 +24,6 @@ final class stratum_status
         if ($host === '') {
             return self::unavailable('INVALID_HOST', 'Stratum host is not configured.');
         }
-
         if ($port < 1 || $port > 65535) {
             return self::unavailable('INVALID_PORT', 'Stratum port is invalid.');
         }
@@ -32,7 +31,6 @@ final class stratum_status
         $target = 'tcp://' . self::socketHost($host) . ':' . $port;
         $errno = 0;
         $error = '';
-
         $socket = @stream_socket_client(
             $target,
             $errno,
@@ -61,54 +59,74 @@ final class stratum_status
             return self::unavailable('WRITE_FAILED', 'Unable to send the Stratum status request.');
         }
 
-        $raw = '';
-        while (!feof($socket)) {
-            $chunk = fread($socket, 4096);
-            if ($chunk === false) {
-                fclose($socket);
-                return self::unavailable('READ_FAILED', 'Unable to read the Stratum status response.');
-            }
-
-            if ($chunk !== '') {
-                $raw .= $chunk;
-                if (strlen($raw) > self::MAX_HEADER_BYTES + self::MAX_RESPONSE_BYTES) {
-                    fclose($socket);
-                    return self::unavailable('RESPONSE_TOO_LARGE', 'Stratum status response exceeded the allowed size.');
-                }
-            }
-
-            $meta = stream_get_meta_data($socket);
-            if (!empty($meta['timed_out'])) {
-                fclose($socket);
-                return self::unavailable('TIMEOUT', 'Timed out waiting for the Stratum status response.');
-            }
+        $headerResult = self::readHeaders($socket);
+        if (!isset($headerResult['headers'], $headerResult['body_prefix'])) {
+            fclose($socket);
+            return self::unavailable(
+                (string) ($headerResult['result'] ?? 'READ_FAILED'),
+                (string) ($headerResult['detail'] ?? 'Unable to read the Stratum status response headers.')
+            );
         }
 
-        fclose($socket);
+        $headers = $headerResult['headers'];
+        $body = $headerResult['body_prefix'];
 
-        $separator = strpos($raw, "\r\n\r\n");
-        if ($separator === false || $separator > self::MAX_HEADER_BYTES) {
-            return self::unavailable('INVALID_HTTP', 'Stratum returned an invalid HTTP response.');
-        }
-
-        $headerBlock = substr($raw, 0, $separator);
-        $body = substr($raw, $separator + 4);
-        $headerLines = explode("\r\n", $headerBlock);
-        $statusLine = array_shift($headerLines);
-
+        $statusLine = array_shift($headers);
         if (!is_string($statusLine)
             || preg_match('/^HTTP\/\S+\s+(\d{3})\b/', $statusLine, $matches) !== 1) {
+            fclose($socket);
             return self::unavailable('INVALID_HTTP', 'Stratum returned an invalid HTTP status line.');
         }
 
         $httpStatus = (int) $matches[1];
         if ($httpStatus !== 200) {
+            fclose($socket);
             return self::unavailable('HTTP_ERROR', 'Stratum status endpoint returned HTTP ' . $httpStatus . '.');
         }
 
-        if (strlen($body) > self::MAX_RESPONSE_BYTES) {
+        $contentLength = self::contentLength($headers);
+        if ($contentLength === null) {
+            fclose($socket);
+            return self::unavailable('INVALID_HTTP', 'Stratum response did not include a valid Content-Length header.');
+        }
+        if ($contentLength > self::MAX_RESPONSE_BYTES) {
+            fclose($socket);
             return self::unavailable('RESPONSE_TOO_LARGE', 'Stratum status response exceeded the allowed size.');
         }
+        if (strlen($body) > $contentLength) {
+            $body = substr($body, 0, $contentLength);
+        }
+
+        while (strlen($body) < $contentLength) {
+            $remaining = $contentLength - strlen($body);
+            $chunk = fread($socket, min(4096, $remaining));
+
+            if ($chunk === false) {
+                $meta = stream_get_meta_data($socket);
+                fclose($socket);
+                if (!empty($meta['timed_out'])) {
+                    return self::unavailable('TIMEOUT', 'Timed out waiting for the Stratum status response body.');
+                }
+                return self::unavailable('READ_FAILED', 'Unable to read the Stratum status response body.');
+            }
+
+            if ($chunk === '') {
+                $meta = stream_get_meta_data($socket);
+                if (!empty($meta['timed_out'])) {
+                    fclose($socket);
+                    return self::unavailable('TIMEOUT', 'Timed out waiting for the Stratum status response body.');
+                }
+                if (feof($socket)) {
+                    fclose($socket);
+                    return self::unavailable('TRUNCATED_RESPONSE', 'Stratum closed the connection before the complete response body was received.');
+                }
+                continue;
+            }
+
+            $body .= $chunk;
+        }
+
+        fclose($socket);
 
         try {
             $decoded = json_decode($body, true, 32, JSON_THROW_ON_ERROR);
@@ -137,11 +155,71 @@ final class stratum_status
     }
 
     /** @param resource $socket */
+    private static function readHeaders($socket): array
+    {
+        $raw = '';
+
+        while (strpos($raw, "\r\n\r\n") === false) {
+            if (strlen($raw) >= self::MAX_HEADER_BYTES) {
+                return ['result' => 'INVALID_HTTP', 'detail' => 'Stratum response headers exceeded the allowed size.'];
+            }
+
+            $chunk = fread($socket, min(1024, self::MAX_HEADER_BYTES - strlen($raw)));
+            if ($chunk === false) {
+                $meta = stream_get_meta_data($socket);
+                return [
+                    'result' => !empty($meta['timed_out']) ? 'TIMEOUT' : 'READ_FAILED',
+                    'detail' => !empty($meta['timed_out'])
+                        ? 'Timed out waiting for the Stratum status response headers.'
+                        : 'Unable to read the Stratum status response headers.',
+                ];
+            }
+
+            if ($chunk === '') {
+                $meta = stream_get_meta_data($socket);
+                if (!empty($meta['timed_out'])) {
+                    return ['result' => 'TIMEOUT', 'detail' => 'Timed out waiting for the Stratum status response headers.'];
+                }
+                if (feof($socket)) {
+                    return ['result' => 'TRUNCATED_RESPONSE', 'detail' => 'Stratum closed the connection before sending complete HTTP headers.'];
+                }
+                continue;
+            }
+
+            $raw .= $chunk;
+        }
+
+        $separator = strpos($raw, "\r\n\r\n");
+        if ($separator === false) {
+            return ['result' => 'INVALID_HTTP', 'detail' => 'Stratum returned an invalid HTTP response.'];
+        }
+
+        $headerBlock = substr($raw, 0, $separator);
+        return [
+            'headers' => explode("\r\n", $headerBlock),
+            'body_prefix' => substr($raw, $separator + 4),
+        ];
+    }
+
+    private static function contentLength(array $headers): ?int
+    {
+        foreach ($headers as $header) {
+            if (!is_string($header)) {
+                continue;
+            }
+            if (preg_match('/^Content-Length:\s*([0-9]+)\s*$/i', $header, $matches) === 1) {
+                $length = (int) $matches[1];
+                return $length >= 0 ? $length : null;
+            }
+        }
+        return null;
+    }
+
+    /** @param resource $socket */
     private static function writeAll($socket, string $data): bool
     {
         $length = strlen($data);
         $offset = 0;
-
         while ($offset < $length) {
             $written = fwrite($socket, substr($data, $offset));
             if ($written === false || $written === 0) {
@@ -149,7 +227,6 @@ final class stratum_status
             }
             $offset += $written;
         }
-
         return true;
     }
 
