@@ -225,7 +225,11 @@ final class explorer_model extends model
 
     public function homeStatus(): array
     {
-        $status = $this->chainStatus($this->databaseState());
+        $schema = $this->databaseState();
+        $status = $this->chainStatus($schema);
+        $stratum = $this->stratumStatus($schema);
+        $mining = $this->homeMiningStatus($stratum);
+
         if (($status['state'] ?? '') !== 'online' || !is_array($status['info'] ?? null)) {
             return [
                 'available' => false,
@@ -233,7 +237,7 @@ final class explorer_model extends model
                 'message' => (string) ($status['message'] ?? 'Blockchain status is temporarily unavailable.'),
                 'height' => null,
                 'block_count' => null,
-                'mining' => ['available' => false],
+                'mining' => $mining,
             ];
         }
 
@@ -244,7 +248,7 @@ final class explorer_model extends model
             'message' => (string) ($status['message'] ?? 'Blockchain connected.'),
             'height' => isset($info['Chain height']) ? (string) $info['Chain height'] : null,
             'block_count' => isset($info['Stored block count']) ? (string) $info['Stored block count'] : null,
-            'mining' => ['available' => false],
+            'mining' => $mining,
         ];
     }
 
@@ -265,6 +269,38 @@ final class explorer_model extends model
             'block_id' => $blockId,
             'height' => isset($status['info']['Chain height'])
                 ? (string) $status['info']['Chain height']
+                : null,
+        ];
+    }
+
+    private function homeMiningStatus(array $stratum): array
+    {
+        if (
+            ($stratum['state'] ?? '') !== 'online'
+            || !is_array($stratum['info'] ?? null)
+        ) {
+            return [
+                'available' => false,
+                'running' => false,
+                'chain_connected' => false,
+                'work_available' => false,
+                'miners' => null,
+                'hashrate' => null,
+            ];
+        }
+
+        $info = $stratum['info'];
+
+        return [
+            'available' => true,
+            'running' => ($info['status'] ?? '') === 'running',
+            'chain_connected' => ($info['chain_connected'] ?? false) === true,
+            'work_available' => ($info['work_available'] ?? false) === true,
+            'miners' => isset($info['miners']) && is_int($info['miners'])
+                ? $info['miners']
+                : null,
+            'hashrate' => isset($info['hashrate']) && is_int($info['hashrate'])
+                ? $info['hashrate']
                 : null,
         ];
     }
