@@ -25,6 +25,7 @@
         "models/explorer_model.php",
         "libraries/stnc_client.php",
         "libraries/explorer_status.php",
+        "libraries/stratum_status.php",
         "views/admin/explorer.php",
         "views/index.php",
         "sql/schema.sql",
@@ -38,7 +39,7 @@
     },
     "routes": [
         "index",
-		"blocks",
-		"block"
+        "blocks",
+        "block"
     ]
 }
