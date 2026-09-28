@@ -13,6 +13,11 @@ final class stnc_exception extends RuntimeException
 /** Read-only STNC v2 transport. Endpoint arguments must come from operator configuration. */
 final class stnc_client
 {
+    private const METHOD_INFO = 0x0001;
+    private const METHOD_BLOCK_HEIGHT = 0x0002;
+    private const METHOD_BLOCK_ID = 0x0003;
+    private const MAX_BLOCK_BYTES = 1070465;
+
     private string $endpoint;
 
     public function __construct(
@@ -30,13 +35,40 @@ final class stnc_client
         $this->endpoint = 'tcp://' . $host . ':' . $port;
     }
 
-    /**
-     * INFO is the initial transport probe. Its 184-byte body remains opaque here.
-     * @return array{status:int, request_id:string, payload:string}
-     */
+    /** @return array{status:int, request_id:string, payload:string} */
     public function getChainInfo(): array
     {
-        $id = random_bytes(8); // Preserve all 64 bits without native integer conversion.
+        return $this->request(self::METHOD_INFO, '', 184);
+    }
+
+    /** @return array{status:int, request_id:string, payload:string} */
+    public function getBlockByHeight(int|string $height): array
+    {
+        return $this->request(
+            self::METHOD_BLOCK_HEIGHT,
+            $this->encodeU64($height),
+            null
+        );
+    }
+
+    /** @return array{status:int, request_id:string, payload:string} */
+    public function getBlockById(string $blockId): array
+    {
+        $blockId = strtolower(trim($blockId));
+        if (preg_match('/^[0-9a-f]{64}$/', $blockId) !== 1) {
+            throw new InvalidArgumentException('Invalid block ID');
+        }
+        $payload = hex2bin($blockId);
+        if (!is_string($payload) || strlen($payload) !== 32) {
+            throw new InvalidArgumentException('Invalid block ID');
+        }
+        return $this->request(self::METHOD_BLOCK_ID, $payload, null);
+    }
+
+    /** @return array{status:int, request_id:string, payload:string} */
+    private function request(int $method, string $payload, ?int $fixedSuccessLength): array
+    {
+        $id = random_bytes(8);
         $errno = 0;
         $error = '';
         $socket = @stream_socket_client(
@@ -58,7 +90,7 @@ final class stnc_client
                 throw new stnc_exception('TRANSPORT_FAILED');
             }
             $deadline = hrtime(true) / 1e9 + $this->operationTimeout;
-            $request = 'STNC' . pack('nnnn', 2, 1, 1, 0) . $id . pack('N', 0);
+            $request = 'STNC' . pack('nnnn', 2, 1, $method, 0) . $id . pack('N', strlen($payload)) . $payload;
             $offset = 0;
             while ($offset < strlen($request)) {
                 $this->waitReady($socket, $deadline, true);
@@ -68,21 +100,81 @@ final class stnc_client
                 }
                 $offset += $written;
             }
+
             $header = $this->readExact($socket, 24, $deadline);
             $fields = unpack('nversion/nkind/nmethod/nstatus', substr($header, 4, 8));
-            // Compare the encoded length directly; avoid unsigned u32 conversion on 32-bit PHP.
-            $expectedLength = $fields['status'] === 0 ? 184 : 0;
-            if (substr($header, 0, 4) !== 'STNC' || $fields['version'] !== 2
-                || $fields['kind'] !== 2 || $fields['method'] !== 1
-                || $fields['status'] > 10 || substr($header, 12, 8) !== $id
-                || substr($header, 20, 4) !== pack('N', $expectedLength)) {
+            if (!is_array($fields)
+                || substr($header, 0, 4) !== 'STNC'
+                || $fields['version'] !== 2
+                || $fields['kind'] !== 2
+                || $fields['method'] !== $method
+                || $fields['status'] > 10
+                || substr($header, 12, 8) !== $id) {
                 throw new stnc_exception('MALFORMED_RESPONSE');
             }
-            return ['status' => $fields['status'], 'request_id' => bin2hex($id),
-                'payload' => $this->readExact($socket, $expectedLength, $deadline)];
+
+            $lengthFields = unpack('Nlength', substr($header, 20, 4));
+            $length = is_array($lengthFields) ? (int) $lengthFields['length'] : -1;
+            if ($length < 0 || $length > self::MAX_BLOCK_BYTES) {
+                throw new stnc_exception('MALFORMED_RESPONSE');
+            }
+            if ($fields['status'] !== 0 && $length !== 0) {
+                throw new stnc_exception('MALFORMED_RESPONSE');
+            }
+            if ($fields['status'] === 0 && $fixedSuccessLength !== null && $length !== $fixedSuccessLength) {
+                throw new stnc_exception('MALFORMED_RESPONSE');
+            }
+            if ($fields['status'] === 0 && $fixedSuccessLength === null && $length < 168) {
+                throw new stnc_exception('MALFORMED_RESPONSE');
+            }
+
+            return [
+                'status' => $fields['status'],
+                'request_id' => bin2hex($id),
+                'payload' => $this->readExact($socket, $length, $deadline),
+            ];
         } finally {
             fclose($socket);
         }
+    }
+
+    private function encodeU64(int|string $value): string
+    {
+        $decimal = trim((string) $value);
+        if ($decimal === '' || preg_match('/^[0-9]+$/', $decimal) !== 1) {
+            throw new InvalidArgumentException('Invalid block height');
+        }
+        $decimal = ltrim($decimal, '0');
+        if ($decimal === '') {
+            $decimal = '0';
+        }
+        $bytes = '';
+        for ($i = 0; $i < 8; ++$i) {
+            [$decimal, $remainder] = $this->decimalDivMod256($decimal);
+            $bytes = chr($remainder) . $bytes;
+        }
+        if ($decimal !== '0') {
+            throw new InvalidArgumentException('Block height exceeds u64');
+        }
+        return $bytes;
+    }
+
+    /** @return array{0:string,1:int} */
+    private function decimalDivMod256(string $decimal): array
+    {
+        $quotient = '';
+        $remainder = 0;
+        $length = strlen($decimal);
+        for ($i = 0; $i < $length; ++$i) {
+            $digit = ord($decimal[$i]) - 48;
+            $number = $remainder * 10 + $digit;
+            $q = intdiv($number, 256);
+            $remainder = $number % 256;
+            if ($quotient !== '' || $q !== 0) {
+                $quotient .= (string) $q;
+            }
+        }
+        return [$quotient === '' ? '0' : $quotient, $remainder];
     }
 
     private function readExact($socket, int $length, float $deadline): string
