@@ -83,6 +83,87 @@ final class explorer_model extends model
         self::$requestStatusCache = null;
     }
 
+    public function stratumConfiguration(): array
+    {
+        $row = $this->fetch(
+            'SELECT `stratum_host`, `stratum_port` FROM `explorer_settings` WHERE `id` = 1'
+        );
+
+        return is_array($row) ? $row : [];
+    }
+
+    public function saveStratumConfiguration(array $input): void
+    {
+        $host = is_string($input['stratum_host'] ?? null)
+            ? trim($input['stratum_host'])
+            : '';
+        $port = $input['stratum_port'] ?? '';
+
+        if ($host === '') {
+            throw new InvalidArgumentException('Enter a Stratum host.');
+        }
+
+        if (
+            filter_var(
+                $port,
+                FILTER_VALIDATE_INT,
+                ['options' => ['min_range' => 1, 'max_range' => 65535]]
+            ) === false
+        ) {
+            throw new InvalidArgumentException('Enter a valid Stratum port (1–65535).');
+        }
+
+        $this->query(
+            'INSERT INTO `explorer_settings` (`id`, `stratum_host`, `stratum_port`) '
+            . 'VALUES (1, :stratum_host, :stratum_port) ON DUPLICATE KEY UPDATE '
+            . '`stratum_host` = VALUES(`stratum_host`), `stratum_port` = VALUES(`stratum_port`)',
+            [
+                'stratum_host' => $host,
+                'stratum_port' => (int) $port,
+            ]
+        );
+    }
+
+    public function stratumStatus(string $schema): array
+    {
+        if ($schema !== 'current') {
+            return [
+                'state' => 'unconfigured',
+                'message' => 'Stratum not configured.',
+            ];
+        }
+
+        $configuration = $this->stratumConfiguration();
+        $host = trim((string) ($configuration['stratum_host'] ?? ''));
+        $port = $configuration['stratum_port'] ?? null;
+
+        if (
+            $host === ''
+            || !is_numeric($port)
+            || (int) $port < 1
+            || (int) $port > 65535
+        ) {
+            return [
+                'state' => 'unconfigured',
+                'message' => 'Stratum not configured.',
+            ];
+        }
+
+        require_once __DIR__ . '/../libraries/stratum_status.php';
+
+        try {
+            return stratum_status::load([
+                'host' => $host,
+                'port' => (int) $port,
+            ]);
+        } catch (Throwable $exception) {
+            return [
+                'state' => 'unavailable',
+                'message' => 'Stratum status is temporarily unavailable.',
+            ];
+        }
+    }
+
     public function chainStatus(string $schema): array
     {
         if ($schema !== 'current') {
@@ -111,11 +192,6 @@ final class explorer_model extends model
         return $status;
     }
 
-    /**
-     * Bounded status contract consumed by the Home module.
-     * Observation failure is represented as unavailable, never as proof that
-     * STN Chain itself is offline.
-     */
     public function homeStatus(): array
     {
         $status = $this->chainStatus($this->databaseState());
@@ -141,10 +217,6 @@ final class explorer_model extends model
         ];
     }
 
-    /**
-     * Return the latest observed Chain tip without opening a second connection
-     * when homeStatus() has already observed INFO during this request.
-     */
     public function latestBlock(): array
     {
         $status = $this->chainStatus($this->databaseState());
@@ -168,11 +240,6 @@ final class explorer_model extends model
 
     private function schemaVersion(): ?string
     {
-        /*
-         * Explorer 1.0 deployments predate the schema_version column.
-         * Never query a column until its presence has been established: doing
-         * so turns a normal module migration state into a PDO exception.
-         */
         if (!$this->columnExists(self::STATE_TABLE, 'schema_version')) {
             return $this->tableExists('explorer_settings')
                 ? $this->targetVersion()
