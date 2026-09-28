@@ -37,10 +37,21 @@ final class stnc_client
     public function getChainInfo(): array
     {
         $id = random_bytes(8); // Preserve all 64 bits without native integer conversion.
-        $socket = @stream_socket_client($this->endpoint, $errno, $error,
-            $this->connectTimeout, STREAM_CLIENT_CONNECT);
+        $errno = 0;
+        $error = '';
+        $socket = @stream_socket_client(
+            $this->endpoint,
+            $errno,
+            $error,
+            $this->connectTimeout,
+            STREAM_CLIENT_CONNECT
+        );
         if ($socket === false) {
-            throw new stnc_exception('CONNECTION_FAILED');
+            $detail = 'CONNECTION_FAILED';
+            if ($errno !== 0 || $error !== '') {
+                $detail .= ' (' . $errno . ($error !== '' ? ': ' . $error : '') . ')';
+            }
+            throw new stnc_exception($detail);
         }
         try {
             if (!stream_set_blocking($socket, false)) {
