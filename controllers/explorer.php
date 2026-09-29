@@ -41,8 +41,16 @@ final class explorer extends controller
         }
 
         try {
-            $sync = $model->syncBlocks();
+            /*
+             * Public page rendering must never synchronize Chain history.
+             * The Explorer serves its already-indexed local view immediately;
+             * synchronization is a separate bounded operation.
+             */
             $blocks = $model->blocks();
+            $sync = [
+                'state' => 'local',
+                'indexed' => count($blocks),
+            ];
         } catch (Throwable $exception) {
             $sync = [
                 'state' => 'unavailable',
