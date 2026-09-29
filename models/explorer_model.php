@@ -105,18 +105,62 @@ final class explorer_model extends model
         $limit = max(1, min(500, $limit)); $statement = $this->query('SELECT `block_id`, `height`, `block_timestamp` AS `timestamp`, `transaction_count` FROM `explorer_blocks` ORDER BY `height` DESC LIMIT ' . $limit); return $statement->fetchAll();
     }
 
-    public function blockById(string $blockId): ?array
+    public function blockById(string $blockId): array
     {
-        $blockId = strtolower(trim($blockId)); if (preg_match('/^[0-9a-f]{64}$/', $blockId) !== 1) { return null; }
-        $indexed = $this->fetch('SELECT `height` FROM `explorer_blocks` WHERE `block_id` = :block_id LIMIT 1', ['block_id' => $blockId]);
-        $client = $this->stncClient();
-        $response = is_array($indexed) && isset($indexed['height'])
-            ? $client->getBlockByHeight((int) $indexed['height'])
-            : $client->getBlockById($blockId);
-        if (($response['status'] ?? -1) === 6) { return null; }
-        if (($response['status'] ?? -1) !== 0) { throw new RuntimeException('STNC block lookup failed.'); }
-        $payload = (string) ($response['payload'] ?? ''); if (!hash_equals($blockId, $this->blockId($payload))) { throw new RuntimeException('STNC returned a block with a mismatched canonical ID.'); }
-        return $this->decodeBlock($payload);
+        $blockId = strtolower(trim($blockId));
+        if (preg_match('/^[0-9a-f]{64}$/', $blockId) !== 1) {
+            return ['state' => 'invalid'];
+        }
+
+        /*
+         * Public block pages are served only from the Explorer's local index.
+         * A visitor must never trigger an expensive BLOCK_ID history search on
+         * the Chain. The index is evidence cached by the Explorer; Chain
+         * consensus remains authoritative and is not redefined here.
+         */
+        $indexed = $this->fetch(
+            'SELECT `height` FROM `explorer_blocks` WHERE `block_id` = :block_id LIMIT 1',
+            ['block_id' => $blockId]
+        );
+
+        if (!is_array($indexed) || !isset($indexed['height'])) {
+            return [
+                'state' => 'not_found',
+                'message' => 'Block is not currently indexed.',
+            ];
+        }
+
+        try {
+            $response = $this->stncClient()->getBlockByHeight((int) $indexed['height']);
+        } catch (stnc_exception $exception) {
+            return [
+                'state' => 'unavailable',
+                'message' => 'Block data is temporarily unavailable.',
+            ];
+        }
+
+        if (($response['status'] ?? -1) === 6) {
+            return ['state' => 'not_found'];
+        }
+        if (($response['status'] ?? -1) !== 0) {
+            return [
+                'state' => 'unavailable',
+                'message' => 'Block data is temporarily unavailable.',
+            ];
+        }
+
+        $payload = (string) ($response['payload'] ?? '');
+        if (!hash_equals($blockId, $this->blockId($payload))) {
+            return [
+                'state' => 'unavailable',
+                'message' => 'Indexed block no longer matches accepted Chain state.',
+            ];
+        }
+
+        return [
+            'state' => 'found',
+            'block' => $this->decodeBlock($payload),
+        ];
     }
 
     private function stncClient(): stnc_client
@@ -155,5 +199,5 @@ final class explorer_model extends model
     private function patchFile(string $current, string $target): ?string { $file = __DIR__ . '/../sql/patches/' . $current . '-to-' . $target . '.sql'; return is_file($file) && !is_link($file) ? $file : null; }
     private function executeSqlFile(string $file): void { $sql = is_file($file) ? file_get_contents($file) : false; if (!is_string($sql) || trim($sql) === '') { throw new RuntimeException('SQL file could not be read.'); } $statements = preg_split('/;\s*(?:\r?\n|$)/', $sql); if (!is_array($statements)) { throw new RuntimeException('SQL file could not be parsed.'); } foreach ($statements as $statement) { $statement = trim($statement); if ($statement !== '') { $this->query($statement); } } }
     private function tableExists(string $table): bool { return (bool) $this->fetch('SELECT 1 FROM information_schema.tables WHERE table_schema = :schema AND table_name = :table_name LIMIT 1', ['schema' => DB_NAME, 'table_name' => $table]); }
-    private function columnExists(string $table, string $column): bool { return (bool) $this->fetch('SELECT 1 FROM information_schema.columns WHERE table_schema = :schema AND table_name = :table_name AND column_name = :column_name LIMIT 1', ['schema' => DB_NAME, 'table_name' => $table, 'column_name' => $column]); }
+    private function columnExists(string $table, string $column): bool { return (bool) $this->fetch('SELECT 1 FROM information_schema.columns WHERE table_schema = :schema AND table_name = :table_name AND column_name = :column_name LIMIT 1', ['schema' => DB_NAME, 'table_name' => $table, 'column' => $column]); }
 }
