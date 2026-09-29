@@ -87,7 +87,8 @@ final class explorer_model extends model
         if ($this->databaseState() !== 'current') { return; }
         $status = $this->chainStatus('current'); if (($status['state'] ?? '') !== 'online' || !is_array($status['info'] ?? null)) { return; }
         $tipHeight = trim((string) ($status['info']['Chain height'] ?? '')); if (preg_match('/^[0-9]+$/', $tipHeight) !== 1 || strlen($tipHeight) > 18) { return; }
-        $tip = (int) $tipHeight; $row = $this->fetch('SELECT MAX(`height`) AS `height` FROM `explorer_blocks`'); $start = is_array($row) && $row['height'] !== null ? ((int) $row['height'] + 1) : 0;
+        $tip = (int) $tipHeight; $row = $this->fetch('SELECT MAX(`height`) AS `height` FROM `explorer_blocks`');
+        $start = is_array($row) && $row['height'] !== null ? ((int) $row['height'] + 1) : max(0, $tip - 99);
         if ($start > $tip) { return; }
         $client = $this->stncClient();
         for ($height = $start; $height <= $tip; ++$height) {
@@ -107,7 +108,13 @@ final class explorer_model extends model
     public function blockById(string $blockId): ?array
     {
         $blockId = strtolower(trim($blockId)); if (preg_match('/^[0-9a-f]{64}$/', $blockId) !== 1) { return null; }
-        $response = $this->stncClient()->getBlockById($blockId); if (($response['status'] ?? -1) === 6) { return null; } if (($response['status'] ?? -1) !== 0) { throw new RuntimeException('STNC block lookup failed.'); }
+        $indexed = $this->fetch('SELECT `height` FROM `explorer_blocks` WHERE `block_id` = :block_id LIMIT 1', ['block_id' => $blockId]);
+        $client = $this->stncClient();
+        $response = is_array($indexed) && isset($indexed['height'])
+            ? $client->getBlockByHeight((int) $indexed['height'])
+            : $client->getBlockById($blockId);
+        if (($response['status'] ?? -1) === 6) { return null; }
+        if (($response['status'] ?? -1) !== 0) { throw new RuntimeException('STNC block lookup failed.'); }
         $payload = (string) ($response['payload'] ?? ''); if (!hash_equals($blockId, $this->blockId($payload))) { throw new RuntimeException('STNC returned a block with a mismatched canonical ID.'); }
         return $this->decodeBlock($payload);
     }
