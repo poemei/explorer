@@ -65,7 +65,6 @@ final class stratum_status
         $curlErrno = curl_errno($curl);
         $curlError = curl_error($curl);
         $httpStatus = (int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
-        curl_close($curl);
 
         if ($ok === false) {
             if ($curlErrno === CURLE_WRITE_ERROR && strlen($response) >= self::MAX_RESPONSE_BYTES) {
