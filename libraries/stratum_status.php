@@ -12,8 +12,7 @@ final class stratum_status
 {
     private const EXPECTED_SERVICE = 'STN-Stratum';
     private const STATUS_PATH = '/status';
-    private const CONNECT_TIMEOUT_SECONDS = 1.0;
-    private const IO_TIMEOUT_SECONDS = 2;
+    private const TOTAL_TIMEOUT_SECONDS = 3.0;
     private const MAX_RESPONSE_BYTES = 16384;
 
     public static function load(string $host, int $port): array
@@ -26,112 +25,78 @@ final class stratum_status
         if ($port < 1 || $port > 65535) {
             return self::unavailable('INVALID_PORT', 'Stratum port is invalid.');
         }
+        if (!filter_var('http://' . self::urlHost($host) . ':' . $port . self::STATUS_PATH, FILTER_VALIDATE_URL)) {
+            return self::unavailable('INVALID_HOST', 'Stratum host is invalid.');
+        }
 
-        $endpoint = 'tcp://' . self::socketHost($host) . ':' . $port;
-        $errno = 0;
-        $error = '';
-        $socket = @stream_socket_client(
-            $endpoint,
-            $errno,
-            $error,
-            self::CONNECT_TIMEOUT_SECONDS,
-            STREAM_CLIENT_CONNECT
-        );
+        $url = 'http://' . self::urlHost($host) . ':' . $port . self::STATUS_PATH;
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'GET',
+                'protocol_version' => 1.1,
+                'timeout' => self::TOTAL_TIMEOUT_SECONDS,
+                'ignore_errors' => true,
+                'follow_location' => 0,
+                'max_redirects' => 0,
+                'header' => [
+                    'Accept: application/json',
+                    'User-Agent: STN-Explorer/1.1',
+                    'Connection: close',
+                ],
+            ],
+        ]);
 
-        if ($socket === false) {
-            $detail = 'Unable to connect to Stratum status endpoint.';
-            if ($errno !== 0 || $error !== '') {
-                $detail .= ' (' . $errno . ($error !== '' ? ': ' . $error : '') . ')';
-            }
-            return self::unavailable('CONNECTION_FAILED', $detail);
+        $stream = @fopen($url, 'rb', false, $context);
+        if ($stream === false) {
+            return self::unavailable('CONNECTION_FAILED', 'Unable to open Stratum status endpoint.');
         }
 
         try {
-            if (!stream_set_timeout($socket, self::IO_TIMEOUT_SECONDS)) {
-                return self::unavailable('TRANSPORT_FAILED', 'Unable to configure Stratum status socket timeout.');
+            $meta = stream_get_meta_data($stream);
+            $headers = is_array($meta['wrapper_data'] ?? null) ? $meta['wrapper_data'] : [];
+            $status = self::httpStatus($headers);
+
+            if ($status === null) {
+                return self::unavailable('INVALID_HTTP', 'Stratum status endpoint did not return a valid HTTP status.');
+            }
+            if ($status !== 200) {
+                return self::unavailable('HTTP_ERROR', 'Stratum status endpoint returned HTTP ' . $status . '.');
             }
 
-            $request = "GET " . self::STATUS_PATH . " HTTP/1.1\r\n"
-                . 'Host: ' . self::httpHost($host, $port) . "\r\n"
-                . "Accept: application/json\r\n"
-                . "User-Agent: STN-Explorer/1.1\r\n"
-                . "Connection: close\r\n\r\n";
-
-            if (!self::writeAll($socket, $request)) {
-                return self::unavailable('WRITE_FAILED', 'Unable to send Stratum status request.');
-            }
-
-            $response = '';
-            while (!feof($socket)) {
-                $chunk = fread($socket, 4096);
-                if ($chunk === false) {
-                    return self::unavailable('READ_FAILED', 'Unable to read Stratum status response.');
-                }
-
-                if ($chunk !== '') {
-                    $response .= $chunk;
-                    if (strlen($response) > self::MAX_RESPONSE_BYTES) {
-                        return self::unavailable('RESPONSE_TOO_LARGE', 'Stratum status response exceeded the allowed size.');
-                    }
-                }
-
-                $meta = stream_get_meta_data($socket);
+            $body = stream_get_contents($stream, self::MAX_RESPONSE_BYTES + 1);
+            if ($body === false) {
+                $meta = stream_get_meta_data($stream);
                 if (($meta['timed_out'] ?? false) === true) {
                     return self::unavailable('TIMEOUT', 'Stratum status response timed out.');
                 }
+                return self::unavailable('READ_FAILED', 'Unable to read Stratum status response.');
+            }
+
+            $meta = stream_get_meta_data($stream);
+            if (($meta['timed_out'] ?? false) === true) {
+                return self::unavailable('TIMEOUT', 'Stratum status response timed out.');
             }
         } finally {
-            fclose($socket);
+            fclose($stream);
         }
 
-        if ($response === '') {
+        if (strlen($body) > self::MAX_RESPONSE_BYTES) {
+            return self::unavailable('RESPONSE_TOO_LARGE', 'Stratum status response exceeded the allowed size.');
+        }
+        if ($body === '') {
             return self::unavailable('EMPTY_RESPONSE', 'Stratum returned an empty response.');
         }
 
-        $separator = strpos($response, "\r\n\r\n");
-        if ($separator === false) {
-            return self::unavailable('INVALID_HTTP', 'Stratum returned an incomplete HTTP response.');
-        }
-
-        $headerText = substr($response, 0, $separator);
-        $body = substr($response, $separator + 4);
-        $headerLines = explode("\r\n", $headerText);
-        $statusLine = array_shift($headerLines);
-
-        if (!is_string($statusLine)
-            || preg_match('/^HTTP\/1\.[01]\s+([0-9]{3})(?:\s|$)/', $statusLine, $matches) !== 1) {
-            return self::unavailable('INVALID_HTTP', 'Stratum returned an invalid HTTP status line.');
-        }
-
-        $httpStatus = (int) $matches[1];
-        if ($httpStatus !== 200) {
-            return self::unavailable('HTTP_ERROR', 'Stratum status endpoint returned HTTP ' . $httpStatus . '.');
-        }
-
-        $contentLength = null;
-        $contentType = null;
-        foreach ($headerLines as $line) {
-            $colon = strpos($line, ':');
-            if ($colon === false) {
-                continue;
-            }
-            $name = strtolower(trim(substr($line, 0, $colon)));
-            $value = trim(substr($line, $colon + 1));
-            if ($name === 'content-length' && preg_match('/^[0-9]+$/', $value) === 1) {
-                $contentLength = (int) $value;
-            } elseif ($name === 'content-type') {
-                $contentType = strtolower($value);
-            }
-        }
-
-        if ($contentLength === null || $contentLength < 1 || $contentLength > self::MAX_RESPONSE_BYTES) {
-            return self::unavailable('INVALID_HTTP', 'Stratum returned an invalid Content-Length.');
-        }
-        if (strlen($body) !== $contentLength) {
-            return self::unavailable('INCOMPLETE_RESPONSE', 'Stratum status response length did not match Content-Length.');
-        }
-        if ($contentType === null || !str_starts_with($contentType, 'application/json')) {
+        $contentType = self::headerValue($headers, 'content-type');
+        if ($contentType !== null && !str_starts_with(strtolower($contentType), 'application/json')) {
             return self::unavailable('INVALID_HTTP', 'Stratum status response was not JSON.');
+        }
+
+        $contentLength = self::headerValue($headers, 'content-length');
+        if ($contentLength !== null) {
+            if (preg_match('/^[0-9]+$/', $contentLength) !== 1 || (int) $contentLength !== strlen($body)) {
+                return self::unavailable('INCOMPLETE_RESPONSE', 'Stratum status response length did not match Content-Length.');
+            }
         }
 
         try {
@@ -155,23 +120,37 @@ final class stratum_status
             'info' => $validated,
             'diagnostics' => [
                 'result' => 'ok',
-                'http_status' => $httpStatus,
+                'http_status' => $status,
             ],
         ];
     }
 
-    private static function writeAll($socket, string $request): bool
+    private static function httpStatus(array $headers): ?int
     {
-        $offset = 0;
-        $length = strlen($request);
-        while ($offset < $length) {
-            $written = fwrite($socket, substr($request, $offset));
-            if ($written === false || $written === 0) {
-                return false;
+        foreach ($headers as $header) {
+            if (is_string($header) && preg_match('/^HTTP\/\S+\s+([0-9]{3})(?:\s|$)/i', $header, $matches) === 1) {
+                return (int) $matches[1];
             }
-            $offset += $written;
         }
-        return true;
+        return null;
+    }
+
+    private static function headerValue(array $headers, string $wanted): ?string
+    {
+        $wanted = strtolower($wanted);
+        foreach ($headers as $header) {
+            if (!is_string($header)) {
+                continue;
+            }
+            $colon = strpos($header, ':');
+            if ($colon === false) {
+                continue;
+            }
+            if (strtolower(trim(substr($header, 0, $colon))) === $wanted) {
+                return trim(substr($header, $colon + 1));
+            }
+        }
+        return null;
     }
 
     private static function validate(array $data): ?array
@@ -231,17 +210,12 @@ final class stratum_status
         ];
     }
 
-    private static function socketHost(string $host): string
+    private static function urlHost(string $host): string
     {
         if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false) {
             return '[' . $host . ']';
         }
         return $host;
-    }
-
-    private static function httpHost(string $host, int $port): string
-    {
-        return self::socketHost($host) . ':' . $port;
     }
 
     private static function unavailable(string $result, string $detail): array
