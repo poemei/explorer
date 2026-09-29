@@ -17,6 +17,7 @@ final class stnc_client
     private const METHOD_BLOCK_HEIGHT = 0x0002;
     private const METHOD_BLOCK_ID = 0x0003;
     private const MAX_BLOCK_BYTES = 1070465;
+    private const BLOCK_OPERATION_TIMEOUT = 30.0;
 
     private string $endpoint;
 
@@ -39,7 +40,7 @@ final class stnc_client
 
     public function getBlockByHeight(int|string $height): array
     {
-        return $this->request(self::METHOD_BLOCK_HEIGHT, $this->encodeU64($height), null);
+        return $this->request(self::METHOD_BLOCK_HEIGHT, $this->encodeU64($height), null, self::BLOCK_OPERATION_TIMEOUT);
     }
 
     public function getBlockById(string $blockId): array
@@ -48,10 +49,10 @@ final class stnc_client
         if (preg_match('/^[0-9a-f]{64}$/', $blockId) !== 1) { throw new InvalidArgumentException('Invalid block ID'); }
         $payload = hex2bin($blockId);
         if (!is_string($payload) || strlen($payload) !== 32) { throw new InvalidArgumentException('Invalid block ID'); }
-        return $this->request(self::METHOD_BLOCK_ID, $payload, null);
+        return $this->request(self::METHOD_BLOCK_ID, $payload, null, self::BLOCK_OPERATION_TIMEOUT);
     }
 
-    private function request(int $method, string $payload, ?int $fixedSuccessLength): array
+    private function request(int $method, string $payload, ?int $fixedSuccessLength, ?float $operationTimeout = null): array
     {
         $id = random_bytes(8);
         $errno = 0; $error = '';
@@ -63,7 +64,8 @@ final class stnc_client
         }
         try {
             if (!stream_set_blocking($socket, false)) { throw new stnc_exception('TRANSPORT_FAILED'); }
-            $deadline = hrtime(true) / 1e9 + $this->operationTimeout;
+            $timeout = $operationTimeout ?? $this->operationTimeout;
+            $deadline = hrtime(true) / 1e9 + $timeout;
             $request = 'STNC' . pack('nnnn', 2, 1, $method, 0) . $id . pack('N', strlen($payload)) . $payload;
             $offset = 0;
             while ($offset < strlen($request)) {
