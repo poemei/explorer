@@ -8,7 +8,17 @@ final class explorer extends controller
     public function index(array $params = []): void
     {
         $model = $this->model('explorer_model');
-        $this->view('index', ['params' => $params, 'chain' => $model->chainStatus($model->databaseState()), 'latest_block' => $model->latestBlock()]);
+
+        // [AI: GPT-5.6 Sol | 2026-10-03 | Human approval: authorized by operator]
+        // COMPLETE-only contract totals fail closed until an authoritative source is exposed to Explorer.
+        $completedContracts = ['available' => false, 'count' => null];
+
+        $this->view('index', [
+            'params' => $params,
+            'chain' => $model->chainStatus($model->databaseState()),
+            'latest_block' => $model->latestBlock(),
+            'completed_contracts' => $completedContracts,
+        ]);
     }
 
     public function blocks(array $params = []): void
