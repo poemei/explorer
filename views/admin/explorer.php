@@ -16,6 +16,7 @@ if (!theme::render('head', get_defined_vars())) {
     <?php if (!empty($data['stratum_saved'])) : ?><p role="status">Stratum configuration saved.</p><?php endif; ?>
     <?php if (!empty($data['installed'])) : ?><p role="status">SQL installed.</p><?php endif; ?>
     <?php if (!empty($data['updated'])) : ?><p role="status">SQL updated.</p><?php endif; ?>
+    <?php if (!empty($data['synced'])) : ?><p role="status">Explorer index synchronized.</p><?php endif; ?>
     <?php if (!empty($data['deleted_data'])) : ?><p role="status">Module data deleted. Chain and Stratum configuration preserved.</p><?php endif; ?>
 
 <?php $state = (string) ($data['database_state'] ?? 'missing'); ?>
@@ -81,6 +82,14 @@ if (!theme::render('head', get_defined_vars())) {
         <?php endforeach; ?>
         </dl>
     <?php endif; ?>
+
+    <h2>Explorer index</h2>
+    <p>Synchronize the bounded local Explorer index from accepted Chain state. This rebuilds Explorer's local block and transaction records and does not modify Chain.</p>
+    <form method="post" action="/admin/explorer">
+        <?= $this->csrf_field(); ?>
+        <input type="hidden" name="action" value="sync_explorer">
+        <button type="submit">Sync Explorer</button>
+    </form>
 
     <hr>
     <h2>Stratum</h2>
