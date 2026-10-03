@@ -1,7 +1,7 @@
 {
     "name": "Chain Explorer",
     "module": "explorer",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "description": "For STN Chain, the STN Chain Explorer module.",
     "update_url": "https://poemei.com/projetcs/modules/explorer/module.json",
     "creator": "PM",
@@ -12,14 +12,9 @@
         "fingerprint": "762379FB834CDBE299CD5A817640B4869AD65E22",
         "sha256": "e5e7eba2c0630b7696d1c666896092114a0d66df8e16a100259023586836b2ea",
         "key_id": "pm-e3c2ffdafb9920f7",
-        "public_key": "LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUlJQm9qQU5CZ2txaGtpRzl3MEJBUUVGQUFPQ0FZOEFNSUlCaWdLQ0FZRUEza3QrOVJSV1g5eXRKbkRGay9XZgpaV3pDckIvUmdBWEM2emE0QjU1UE9jSnVxbE9IRlo5VDRQazhBd0tsM0dLQitGZjNBVW81VXN5QWIvQnp5VTAwCkZRajREUENybFRXUWRDUFdud1hSVmVjYlNhd1ZxMkg2em1OZ0JzaWFxaWdZS213ZVFvZjB6MzFjWERtWnFmL0EKODlXREkrOHdiaWNreG9KZ3dBaTFRNUJBZlNUdjBPNmNHSmhiSHNza05VSU9YZFB4cWtnTGxlZkdEcjEyTlJWQwphSWFYR0tEaGRTUzB6WWdYLy9QTWZHaXM5a0dYSW4ybVIrbzRvN25GZ0RvTzQzN3JPaXNtSVk1RG8rRkhGNkJYCnZyMERwUGR3aHZHTElmU2tMYnQrbk5iZ1NUb3Q1b3lUZUNRcUt4QVNTbCtNTFhVcHgvQzVmdTFVM1NGN0Y4Z04KUm1QbGZEUkh3TXp1UzRKdEo5VFFQU0M0b3J4dHJnUTZvVjBkcUpCSnBBV1BXdXJUTlB3VkVNazNnV1J1TUs1TQpIVVJkZ0lCZ2FJdVVnR3lVVUlab1pGU0g2TG5oeGZUVGxkckRwUVJRQXRKdFZtdGJhWUZDRkg2THNCNkQvZXRzCkxhZkZsVDVybE1wRVkzZWhUQkdJU3J1QjBmZVIvblZsQUMxZjRvbXlEMURQQWdNQkFBRT0KLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tCg=="
+        "public_key": "LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUlJQm9qQU5CZ2txaGtpRzl3MEJBUUVGQUFPQ0FZOEFNSUlCaWdLQ0FZRUEza3QrOVJSV1g5eXRKbkRGay9XZgpaV3pDckIvUmdBWEM2emE0QjU1UE9jSnVxbE9IRlo5VDRQazhBd0tsM0dLQitGZjNBVW81VXN5QWIvQnp5VTAwCkZRajREUENybFRXUWRDUFdud1hSVmVjYlNhd1ZxMkg2em1OZ0JzaWFxaWdZS213ZVFvZjB6MzFjWERtWnFmL0EKODlXREkrOHdiaWNreG9KZ3dBaTFRNUJBZlNUdjBPNmNHSmhiSHNza05VSU9YZFB4cWtnTGxlZkdEcjEyTlJWQwphSWFYR0tEaGRTUzB6WWdYLy9QTWZHaXM5a0dYSW4ybVIrbzRvN25GZ0RvTzQzN3JPaXNtSVk1RG8rRkhGNkJYCnZyMERwUGd3aHZHTElmU2tMYnQrbk5iZ1NUb3Q1b3lUZUNRcUt4QVNTbCtNTFhVcHgvQzVmdTFVM1NGN0Y4Z04KUm1QbGZEUkh3TXp1UzRKdEo5VFFQU0M0b3J4dHJnUTZvVjBkcUpCSnBBV1BXdXJUTlB3VkVNazNnV1J1TUs1TQpIVVJkZ0lCZ2FJdVVnR3lVVUlab1pGU0g2TG5oeGZUVGxkckRwUVJRQXRKdFZtdGJhWUZDRkg2THNCNkQvZXRzCkxhZkZsVDVybE1wRVkzZWhUQkdJU3J1QjBmZVIvblZsQUMxZjRvbXlEMURQQWdNQkFBRT0KLS0tLS1FTkQgUFVCTElDIEtFWS0tLS0tCg=="
     },
-    "database_tables": [
-        "explorer_transactions",
-        "explorer_blocks",
-        "explorer_state",
-        "explorer_settings"
-    ],
+    "database_tables": ["explorer_transactions", "explorer_blocks", "explorer_state", "explorer_settings"],
     "files": [
         "controllers/explorer.php",
         "models/explorer_model.php",
@@ -28,18 +23,20 @@
         "libraries/stratum_status.php",
         "views/admin/explorer.php",
         "views/index.php",
+        "views/blocks.php",
+        "views/block.php",
+        "views/transactions.php",
+        "views/transaction.php",
         "sql/schema.sql",
         "sql/patches/.gitkeep",
         "sql/patches/1.0.0-to-1.1.0.sql",
+        "sql/patches/1.1.0-to-1.2.0.sql",
         "docs/CHANGELOG.md",
         "docs/STNC.md"
     ],
     "migrations": {
-        "1.0.0-to-1.1.0": "sql/patches/1.0.0-to-1.1.0.sql"
+        "1.0.0-to-1.1.0": "sql/patches/1.0.0-to-1.1.0.sql",
+        "1.1.0-to-1.2.0": "sql/patches/1.1.0-to-1.2.0.sql"
     },
-    "routes": [
-        "index",
-        "blocks",
-        "block"
-    ]
+    "routes": ["index", "blocks", "block", "transactions", "transaction"]
 }
