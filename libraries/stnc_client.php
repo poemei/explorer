@@ -59,7 +59,15 @@ final class stnc_client
         if (preg_match('/^[0-9a-f]{64}$/', $transactionId) !== 1) { throw new InvalidArgumentException('Invalid transaction ID'); }
         $payload = hex2bin($transactionId);
         if (!is_string($payload) || strlen($payload) !== 32) { throw new InvalidArgumentException('Invalid transaction ID'); }
-        return $this->request(self::METHOD_TRANSACTION_STATUS, $payload, 44);
+        try {
+            $response = $this->request(self::METHOD_TRANSACTION_STATUS, $payload, 44);
+            error_log('[Explorer STNC] TRANSACTION_STATUS tx=' . $transactionId . ' status=' . (string) ($response['status'] ?? -1) . ' payload_length=' . strlen((string) ($response['payload'] ?? '')));
+            return $response;
+        } catch (Throwable $exception) {
+            $reason = $exception instanceof stnc_exception ? $exception->reason : $exception->getMessage();
+            error_log('[Explorer STNC] TRANSACTION_STATUS tx=' . $transactionId . ' transport=' . $reason);
+            throw $exception;
+        }
     }
 
     private function request(int $method, string $payload, ?int $fixedSuccessLength, ?float $operationTimeout = null): array
