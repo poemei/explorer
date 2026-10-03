@@ -3,13 +3,6 @@
 if (!theme::render('head', get_defined_vars())) {
     require APPROOT . '/views/inc/head.php';
 }
-
-/**
- * Explorer administration.
- *
- * Configures Chain and Stratum observation endpoints and displays
- * their current operational status.
- */
 ?>
 <main class="container py-4">
     <h1>Chain Explorer administration</h1>
@@ -17,26 +10,13 @@ if (!theme::render('head', get_defined_vars())) {
     <p><a href="/explorer">View Explorer</a></p>
 
     <?php if (!empty($data['error'])) : ?>
-        <p role="alert">
-            <?= htmlspecialchars($data['error'], ENT_QUOTES, 'UTF-8'); ?>
-        </p>
+        <p role="alert"><?= htmlspecialchars($data['error'], ENT_QUOTES, 'UTF-8'); ?></p>
     <?php endif; ?>
-
-    <?php if (!empty($data['saved'])) : ?>
-        <p role="status">Chain configuration saved.</p>
-    <?php endif; ?>
-
-    <?php if (!empty($data['stratum_saved'])) : ?>
-        <p role="status">Stratum configuration saved.</p>
-    <?php endif; ?>
-
-    <?php if (!empty($data['installed'])) : ?>
-        <p role="status">SQL installed.</p>
-    <?php endif; ?>
-
-    <?php if (!empty($data['deleted_data'])) : ?>
-        <p role="status">Module data deleted. Chain and Stratum configuration preserved.</p>
-    <?php endif; ?>
+    <?php if (!empty($data['saved'])) : ?><p role="status">Chain configuration saved.</p><?php endif; ?>
+    <?php if (!empty($data['stratum_saved'])) : ?><p role="status">Stratum configuration saved.</p><?php endif; ?>
+    <?php if (!empty($data['installed'])) : ?><p role="status">SQL installed.</p><?php endif; ?>
+    <?php if (!empty($data['updated'])) : ?><p role="status">SQL updated.</p><?php endif; ?>
+    <?php if (!empty($data['deleted_data'])) : ?><p role="status">Module data deleted. Chain and Stratum configuration preserved.</p><?php endif; ?>
 
 <?php $state = (string) ($data['database_state'] ?? 'missing'); ?>
 
@@ -48,8 +28,12 @@ if (!theme::render('head', get_defined_vars())) {
         <button type="submit">Install SQL</button>
     </form>
 <?php elseif ($state === 'update') : ?>
-    <p>Update SQL is required. Apply the signed Explorer update through Core's module updater.</p>
-    <p><a href="/admin/modules">Open Core module updates</a></p>
+    <p>Update SQL is required before Explorer can continue.</p>
+    <form method="post" action="/admin/explorer">
+        <?= $this->csrf_field(); ?>
+        <input type="hidden" name="action" value="update_sql">
+        <button type="submit">Update SQL</button>
+    </form>
 <?php elseif ($state === 'invalid') : ?>
     <p role="alert">The database schema is incomplete, its version is invalid, or no migration path exists. Administrator recovery is required; installation will not overwrite existing tables.</p>
 <?php else : ?>
@@ -75,7 +59,6 @@ if (!theme::render('head', get_defined_vars())) {
 
     <h2>Chain status</h2>
     <p role="status"><?= htmlspecialchars((string) ($data['chain']['message'] ?? 'Blockchain status unavailable.'), ENT_QUOTES, 'UTF-8'); ?></p>
-
     <?php if (($data['chain']['state'] ?? '') === 'online') : ?>
         <p>Responding node: <?= htmlspecialchars((string) ($data['chain']['source'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></p>
         <dl>
@@ -88,21 +71,12 @@ if (!theme::render('head', get_defined_vars())) {
         <h3>Chain diagnostics</h3>
         <dl>
         <?php foreach ($data['chain']['diagnostics'] as $endpoint => $diagnostic) : ?>
-            <?php
-            if (!is_array($diagnostic)) {
-                continue;
-            }
-            $result = (string) ($diagnostic['result'] ?? 'unknown');
-            ?>
+            <?php if (!is_array($diagnostic)) { continue; } ?>
             <dt><?= htmlspecialchars(ucfirst((string) $endpoint) . ' node', ENT_QUOTES, 'UTF-8'); ?></dt>
             <dd>
-                <strong>Result:</strong> <?= htmlspecialchars($result, ENT_QUOTES, 'UTF-8'); ?>
-                <?php if (isset($diagnostic['status'])) : ?>
-                    <br><strong>STNC status:</strong> <?= htmlspecialchars((string) $diagnostic['status'], ENT_QUOTES, 'UTF-8'); ?>
-                <?php endif; ?>
-                <?php if (!empty($diagnostic['detail'])) : ?>
-                    <br><strong>Detail:</strong> <?= htmlspecialchars((string) $diagnostic['detail'], ENT_QUOTES, 'UTF-8'); ?>
-                <?php endif; ?>
+                <strong>Result:</strong> <?= htmlspecialchars((string) ($diagnostic['result'] ?? 'unknown'), ENT_QUOTES, 'UTF-8'); ?>
+                <?php if (isset($diagnostic['status'])) : ?><br><strong>STNC status:</strong> <?= htmlspecialchars((string) $diagnostic['status'], ENT_QUOTES, 'UTF-8'); ?><?php endif; ?>
+                <?php if (!empty($diagnostic['detail'])) : ?><br><strong>Detail:</strong> <?= htmlspecialchars((string) $diagnostic['detail'], ENT_QUOTES, 'UTF-8'); ?><?php endif; ?>
             </dd>
         <?php endforeach; ?>
         </dl>
@@ -111,7 +85,6 @@ if (!theme::render('head', get_defined_vars())) {
     <hr>
     <h2>Stratum</h2>
     <p>Configure the read-only STN-Stratum status API used by Explorer to observe mining infrastructure.</p>
-
     <?php $stratumConfiguration = $data['stratum_configuration'] ?? []; ?>
     <form method="post" action="/admin/explorer">
         <?= $this->csrf_field(); ?>
@@ -128,7 +101,6 @@ if (!theme::render('head', get_defined_vars())) {
 
     <h2>Stratum status</h2>
     <p role="status"><?= htmlspecialchars((string) ($data['stratum']['message'] ?? 'Stratum status unavailable.'), ENT_QUOTES, 'UTF-8'); ?></p>
-
     <?php if (($data['stratum']['state'] ?? '') === 'online') : ?>
         <?php $stratumInfo = is_array($data['stratum']['info'] ?? null) ? $data['stratum']['info'] : []; ?>
         <dl>
@@ -143,21 +115,6 @@ if (!theme::render('head', get_defined_vars())) {
             <dt>Base ID</dt><dd style="overflow-wrap:anywhere"><?= htmlspecialchars((string) ($stratumInfo['base_id'] ?? '—'), ENT_QUOTES, 'UTF-8'); ?></dd>
             <dt>Target</dt><dd style="overflow-wrap:anywhere"><?= htmlspecialchars((string) ($stratumInfo['target'] ?? '—'), ENT_QUOTES, 'UTF-8'); ?></dd>
             <dt>Uptime</dt><dd><?= htmlspecialchars((string) ($stratumInfo['uptime_seconds'] ?? '0'), ENT_QUOTES, 'UTF-8'); ?> seconds</dd>
-        </dl>
-    <?php elseif (!empty($data['stratum']['diagnostics']) && is_array($data['stratum']['diagnostics'])) : ?>
-        <?php $stratumDiagnostic = $data['stratum']['diagnostics']; ?>
-        <h3>Stratum diagnostics</h3>
-        <dl>
-            <dt>Result</dt>
-            <dd><?= htmlspecialchars((string) ($stratumDiagnostic['result'] ?? 'unknown'), ENT_QUOTES, 'UTF-8'); ?></dd>
-            <?php if (isset($stratumDiagnostic['http_status'])) : ?>
-                <dt>HTTP status</dt>
-                <dd><?= htmlspecialchars((string) $stratumDiagnostic['http_status'], ENT_QUOTES, 'UTF-8'); ?></dd>
-            <?php endif; ?>
-            <?php if (!empty($stratumDiagnostic['detail'])) : ?>
-                <dt>Detail</dt>
-                <dd style="overflow-wrap:anywhere"><?= htmlspecialchars((string) $stratumDiagnostic['detail'], ENT_QUOTES, 'UTF-8'); ?></dd>
-            <?php endif; ?>
         </dl>
     <?php endif; ?>
 
