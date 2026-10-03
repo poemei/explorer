@@ -16,6 +16,7 @@ final class stnc_client
     private const METHOD_INFO = 0x0001;
     private const METHOD_BLOCK_HEIGHT = 0x0002;
     private const METHOD_BLOCK_ID = 0x0003;
+    private const METHOD_TRANSACTION_STATUS = 0x000d;
     private const MAX_BLOCK_BYTES = 1070465;
     private const BLOCK_OPERATION_TIMEOUT = 30.0;
 
@@ -52,6 +53,15 @@ final class stnc_client
         return $this->request(self::METHOD_BLOCK_ID, $payload, null, self::BLOCK_OPERATION_TIMEOUT);
     }
 
+    public function getTransactionStatus(string $transactionId): array
+    {
+        $transactionId = strtolower(trim($transactionId));
+        if (preg_match('/^[0-9a-f]{64}$/', $transactionId) !== 1) { throw new InvalidArgumentException('Invalid transaction ID'); }
+        $payload = hex2bin($transactionId);
+        if (!is_string($payload) || strlen($payload) !== 32) { throw new InvalidArgumentException('Invalid transaction ID'); }
+        return $this->request(self::METHOD_TRANSACTION_STATUS, $payload, 44);
+    }
+
     private function request(int $method, string $payload, ?int $fixedSuccessLength, ?float $operationTimeout = null): array
     {
         $id = random_bytes(8);
@@ -76,7 +86,7 @@ final class stnc_client
             }
             $header = $this->readExact($socket, 24, $deadline);
             $fields = unpack('nversion/nkind/nmethod/nstatus', substr($header, 4, 8));
-            if (!is_array($fields) || substr($header, 0, 4) !== 'STNC' || $fields['version'] !== 2 || $fields['kind'] !== 2 || $fields['method'] !== $method || $fields['status'] > 10 || substr($header, 12, 8) !== $id) {
+            if (!is_array($fields) || substr($header, 0, 4) !== 'STNC' || $fields['version'] !== 2 || $fields['kind'] !== 2 || $fields['method'] !== $method || $fields['status'] > 17 || substr($header, 12, 8) !== $id) {
                 throw new stnc_exception('MALFORMED_RESPONSE');
             }
             $lengthFields = unpack('Nlength', substr($header, 20, 4));
