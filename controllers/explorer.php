@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 final class explorer extends controller
 {
-    private const ADMIN_ACTIONS = ['install_sql', 'update_sql', 'delete_data', 'save_configuration', 'save_stratum_configuration'];
+    private const ADMIN_ACTIONS = ['install_sql', 'update_sql', 'sync_explorer', 'delete_data', 'save_configuration', 'save_stratum_configuration'];
 
     public function index(array $params = []): void
     {
@@ -81,6 +81,17 @@ final class explorer extends controller
             }
 
             if ($state !== 'current') { $this->error_page('Complete the database lifecycle action first.'); return; }
+            if ($action === 'sync_explorer') {
+                try {
+                    $model->deleteData();
+                    $model->syncBlocks();
+                    header('Location: /admin/explorer?synced=1');
+                    exit;
+                } catch (Throwable $e) {
+                    http_response_code(503);
+                    $error = 'Explorer synchronization failed: ' . $e->getMessage();
+                }
+            }
             if ($action === 'delete_data') { $model->deleteData(); header('Location: /admin/explorer?deleted_data=1'); exit; }
             if ($action === 'save_configuration') { try { $model->saveConfiguration($_POST); header('Location: /admin/explorer?saved=1'); exit; } catch (InvalidArgumentException $e) { http_response_code(422); $error = $e->getMessage(); } }
             if ($action === 'save_stratum_configuration') { try { $model->saveStratumConfiguration($_POST); header('Location: /admin/explorer?stratum_saved=1'); exit; } catch (InvalidArgumentException $e) { http_response_code(422); $error = $e->getMessage(); } }
@@ -97,6 +108,7 @@ final class explorer extends controller
             'stratum_saved' => isset($_GET['stratum_saved']),
             'installed' => isset($_GET['installed']),
             'updated' => isset($_GET['updated']),
+            'synced' => isset($_GET['synced']),
             'deleted_data' => isset($_GET['deleted_data']),
         ]);
     }
