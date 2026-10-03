@@ -23,7 +23,24 @@ final class explorer_model extends model
         return $this->patchFile($current, $target) !== null ? 'update' : 'invalid';
     }
 
-    public function installSchema(): void { if ($this->databaseState() !== 'missing') { throw new RuntimeException('Fresh installation requires an absent module schema.'); } $this->executeSqlFile(__DIR__ . '/../sql/schema.sql'); }
+    public function installSchema(): void
+    {
+        if ($this->databaseState() !== 'missing') { throw new RuntimeException('Fresh installation requires an absent module schema.'); }
+        $this->executeSqlFile(__DIR__ . '/../sql/schema.sql');
+    }
+
+    public function updateSchema(): void
+    {
+        if ($this->databaseState() !== 'update') { throw new RuntimeException('No supported Explorer schema update is pending.'); }
+        $current = $this->schemaVersion();
+        $target = $this->targetVersion();
+        if ($current === null || $target === '') { throw new RuntimeException('Explorer schema version is invalid.'); }
+        $file = $this->patchFile($current, $target);
+        if ($file === null) { throw new RuntimeException('No supported Explorer migration path exists.'); }
+        $this->executeSqlFile($file);
+        if ($this->databaseState() !== 'current') { throw new RuntimeException('Explorer schema update did not reach the target version.'); }
+    }
+
     public function deleteData(): void { $this->query('DELETE FROM `explorer_state`'); $this->query('DELETE FROM `explorer_blocks`'); $this->query('DELETE FROM `explorer_transactions` WHERE `id` <> 1'); }
     public function configuration(): array { $row = $this->fetch('SELECT `primary_ip`, `primary_port`, `secondary_ip`, `secondary_port` FROM `explorer_settings` WHERE `id` = 1'); return is_array($row) ? $row : []; }
 
@@ -165,16 +182,18 @@ final class explorer_model extends model
     private function blockTransactions(string $bytes): array
     {
         if (strlen($bytes) < 168 || substr($bytes, 0, 4) !== 'STNB') { throw new RuntimeException('Malformed canonical block.'); }
-        $fields = unpack('Ncount/Nbody', substr($bytes, 160, 8)); if (!is_array($fields)) { throw new RuntimeException('Malformed canonical block.'); }
-        $count = (int) $fields['count']; $offset = 168; $transactions = [];
-        for ($i = 0; $i < $count; ++$i) {
-            if ($offset + 4 > strlen($bytes)) { throw new RuntimeException('Malformed transaction body.'); }
-            $lengthField = unpack('Nlength', substr($bytes, $offset, 4)); $offset += 4; $length = is_array($lengthField) ? (int) $lengthField['length'] : -1;
-            if ($length < 12 || $offset + $length > strlen($bytes)) { throw new RuntimeException('Malformed transaction body.'); }
-            $transaction = substr($bytes, $offset, $length); if (substr($transaction, 0, 4) !== 'STNT') { throw new RuntimeException('Malformed transaction.'); }
-            $transactions[] = $transaction; $offset += $length;
+        $fields = unpack('Ncount/Nbody', substr($bytes, 160, 8));
+        if (!is_array($fields) || strlen($bytes) !== 168 + (int) $fields['body']) { throw new RuntimeException('Malformed canonical block body.'); }
+        $offset = 168; $transactions = [];
+        for ($i = 0; $i < (int) $fields['count']; ++$i) {
+            if ($offset + 4 > strlen($bytes)) { throw new RuntimeException('Malformed transaction framing.'); }
+            $lengthField = unpack('Nvalue', substr($bytes, $offset, 4)); $offset += 4; $length = is_array($lengthField) ? (int) $lengthField['value'] : 0;
+            if ($length < 12 || $offset + $length > strlen($bytes)) { throw new RuntimeException('Malformed transaction framing.'); }
+            $transaction = substr($bytes, $offset, $length); $offset += $length;
+            if (substr($transaction, 0, 4) !== 'STNT') { throw new RuntimeException('Malformed canonical transaction.'); }
+            $transactions[] = $transaction;
         }
-        if ($offset !== strlen($bytes)) { throw new RuntimeException('Malformed transaction body length.'); }
+        if ($offset !== strlen($bytes)) { throw new RuntimeException('Malformed canonical block body.'); }
         return $transactions;
     }
 
@@ -201,5 +220,5 @@ final class explorer_model extends model
     private function patchFile(string $current, string $target): ?string { $file = __DIR__ . '/../sql/patches/' . $current . '-to-' . $target . '.sql'; return is_file($file) && !is_link($file) ? $file : null; }
     private function executeSqlFile(string $file): void { $sql = is_file($file) ? file_get_contents($file) : false; if (!is_string($sql) || trim($sql) === '') { throw new RuntimeException('SQL file could not be read.'); } $statements = preg_split('/;\s*(?:\r?\n|$)/', $sql); if (!is_array($statements)) { throw new RuntimeException('SQL file could not be parsed.'); } foreach ($statements as $statement) { $statement = trim($statement); if ($statement !== '') { $this->query($statement); } } }
     private function tableExists(string $table): bool { return (bool) $this->fetch('SELECT 1 FROM information_schema.tables WHERE table_schema = :schema AND table_name = :table_name LIMIT 1', ['schema' => DB_NAME, 'table_name' => $table]); }
-    private function columnExists(string $table, string $column): bool { return (bool) $this->fetch('SELECT 1 FROM information_schema.columns WHERE table_schema = :schema AND table_name = :table_name AND column_name = :column_name LIMIT 1', ['schema' => DB_NAME, 'table_name' => $table, 'column_name' => $column]); }
+    private function columnExists(string $table, string $column): bool { return (bool) $this->fetch('SELECT 1 FROM information_schema.columns WHERE table_schema = :schema AND table_name = :table_name AND column_name = :column_name LIMIT 1', ['schema' => DB_NAME, 'table_name' => $table, 'column' => $column]); }
 }
