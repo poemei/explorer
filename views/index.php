@@ -21,6 +21,7 @@ if (!theme::render('head', get_defined_vars())) { require APPROOT . '/views/inc/
         <?php else : ?>
             <p>Current Chain data is unavailable.</p>
         <?php endif; ?>
+
         <?php $latestBlock = $data['latest_block'] ?? ['available' => false, 'height' => null, 'block_id' => null]; ?>
         <?php if ($latestBlock['available'] === true) : ?>
             <h2>Latest Block</h2>
@@ -28,6 +29,20 @@ if (!theme::render('head', get_defined_vars())) { require APPROOT . '/views/inc/
                 <dt>Height</dt><dd><?= htmlspecialchars((string) $latestBlock['height'], ENT_QUOTES, 'UTF-8'); ?></dd>
                 <dt>Block ID</dt><dd style="overflow-wrap:anywhere"><a href="/explorer/block/<?= rawurlencode((string) $latestBlock['block_id']); ?>"><?= htmlspecialchars((string) $latestBlock['block_id'], ENT_QUOTES, 'UTF-8'); ?></a></dd>
             </dl>
+        <?php endif; ?>
+
+        <?php
+        // [AI: GPT-5.6 Sol | 2026-10-03 | Human approval: authorized by operator]
+        // Display only an authoritative COMPLETE-state count; unavailable is safer than an inferred value.
+        $completedContracts = is_array($data['completed_contracts'] ?? null)
+            ? $data['completed_contracts']
+            : ['available' => false, 'count' => null];
+        ?>
+        <h2>Completed Contracts</h2>
+        <?php if (($completedContracts['available'] ?? false) === true && isset($completedContracts['count'])) : ?>
+            <p><?= htmlspecialchars((string) $completedContracts['count'], ENT_QUOTES, 'UTF-8'); ?></p>
+        <?php else : ?>
+            <p>Unavailable</p>
         <?php endif; ?>
     <?php else : ?>
         <p>Please try again later. No current Chain data could be retrieved.</p>
