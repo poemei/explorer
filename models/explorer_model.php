@@ -97,6 +97,11 @@ final class explorer_model extends model
             if ((int) $block['height'] !== $height) { throw new RuntimeException('STNC block height mismatch.'); }
             $blockId = $this->blockId($payload);
             $this->query('INSERT INTO `explorer_blocks` (`block_id`, `height`, `block_timestamp`, `transaction_count`) VALUES (:block_id, :height, :block_timestamp, :transaction_count) ON DUPLICATE KEY UPDATE `block_id` = VALUES(`block_id`), `block_timestamp` = VALUES(`block_timestamp`), `transaction_count` = VALUES(`transaction_count`)', ['block_id' => $blockId, 'height' => $height, 'block_timestamp' => (int) $block['timestamp'], 'transaction_count' => (int) $block['transaction_count']]);
+            foreach ($this->blockTransactions($payload) as $position => $transaction) {
+                $transactionId = hash('sha256', "STN-CHAIN:TX:ID:1\0" . $transaction);
+                $type = $this->u16(substr($transaction, 6, 2));
+                $this->query('INSERT INTO `explorer_transactions` (`transaction_id`, `block_id`, `block_height`, `transaction_position`, `transaction_type`) VALUES (:transaction_id, :block_id, :block_height, :transaction_position, :transaction_type) ON DUPLICATE KEY UPDATE `block_id` = VALUES(`block_id`), `block_height` = VALUES(`block_height`), `transaction_position` = VALUES(`transaction_position`), `transaction_type` = VALUES(`transaction_type`)', ['transaction_id' => $transactionId, 'block_id' => $blockId, 'block_height' => $height, 'transaction_position' => $position, 'transaction_type' => $type]);
+            }
         }
     }
 
@@ -105,62 +110,43 @@ final class explorer_model extends model
         $limit = max(1, min(500, $limit)); $statement = $this->query('SELECT `block_id`, `height`, `block_timestamp` AS `timestamp`, `transaction_count` FROM `explorer_blocks` ORDER BY `height` DESC LIMIT ' . $limit); return $statement->fetchAll();
     }
 
+    public function transactions(int $limit = 100): array
+    {
+        $limit = max(1, min(500, $limit));
+        $statement = $this->query('SELECT `transaction_id`, `block_id`, `block_height`, `transaction_position`, `transaction_type` FROM `explorer_transactions` WHERE `transaction_id` IS NOT NULL ORDER BY `block_height` DESC, `transaction_position` DESC LIMIT ' . $limit);
+        return $statement->fetchAll();
+    }
+
+    public function transactionById(string $transactionId): array
+    {
+        $transactionId = strtolower(trim($transactionId));
+        if (preg_match('/^[0-9a-f]{64}$/', $transactionId) !== 1) { return ['state' => 'invalid']; }
+        try { $response = $this->stncClient()->getTransactionStatus($transactionId); }
+        catch (Throwable $exception) { return ['state' => 'unavailable', 'message' => 'Transaction data is temporarily unavailable.']; }
+        if (($response['status'] ?? -1) === 6) { return ['state' => 'not_found']; }
+        if (($response['status'] ?? -1) !== 0) { return ['state' => 'unavailable', 'message' => 'Transaction data is temporarily unavailable.']; }
+        $payload = (string) ($response['payload'] ?? '');
+        if (strlen($payload) !== 44) { return ['state' => 'unavailable', 'message' => 'Transaction data is temporarily unavailable.']; }
+        $height = $this->u64Decimal(substr($payload, 0, 8));
+        $blockId = bin2hex(substr($payload, 8, 32));
+        $position = unpack('Nvalue', substr($payload, 40, 4));
+        $indexed = $this->fetch('SELECT `transaction_type` FROM `explorer_transactions` WHERE `transaction_id` = :transaction_id LIMIT 1', ['transaction_id' => $transactionId]);
+        return ['state' => 'found', 'transaction' => ['transaction_id' => $transactionId, 'block_height' => $height, 'block_id' => $blockId, 'transaction_position' => is_array($position) ? (string) ((int) $position['value']) : '0', 'transaction_type' => is_array($indexed) && $indexed['transaction_type'] !== null ? (string) $indexed['transaction_type'] : null]];
+    }
+
     public function blockById(string $blockId): array
     {
         $blockId = strtolower(trim($blockId));
-        if (preg_match('/^[0-9a-f]{64}$/', $blockId) !== 1) {
-            return ['state' => 'invalid'];
-        }
-
-        /*
-         * Public block pages are served only from the Explorer's local index.
-         * A visitor must never trigger an expensive BLOCK_ID history search on
-         * the Chain. The index is evidence cached by the Explorer; Chain
-         * consensus remains authoritative and is not redefined here.
-         */
-        $indexed = $this->fetch(
-            'SELECT `height` FROM `explorer_blocks` WHERE `block_id` = :block_id LIMIT 1',
-            ['block_id' => $blockId]
-        );
-
-        if (!is_array($indexed) || !isset($indexed['height'])) {
-            return [
-                'state' => 'not_found',
-                'message' => 'Block is not currently indexed.',
-            ];
-        }
-
-        try {
-            $response = $this->stncClient()->getBlockByHeight((int) $indexed['height']);
-        } catch (stnc_exception $exception) {
-            return [
-                'state' => 'unavailable',
-                'message' => 'Block data is temporarily unavailable.',
-            ];
-        }
-
-        if (($response['status'] ?? -1) === 6) {
-            return ['state' => 'not_found'];
-        }
-        if (($response['status'] ?? -1) !== 0) {
-            return [
-                'state' => 'unavailable',
-                'message' => 'Block data is temporarily unavailable.',
-            ];
-        }
-
+        if (preg_match('/^[0-9a-f]{64}$/', $blockId) !== 1) { return ['state' => 'invalid']; }
+        $indexed = $this->fetch('SELECT `height` FROM `explorer_blocks` WHERE `block_id` = :block_id LIMIT 1', ['block_id' => $blockId]);
+        if (!is_array($indexed) || !isset($indexed['height'])) { return ['state' => 'not_found', 'message' => 'Block is not currently indexed.']; }
+        try { $response = $this->stncClient()->getBlockByHeight((int) $indexed['height']); }
+        catch (stnc_exception $exception) { return ['state' => 'unavailable', 'message' => 'Block data is temporarily unavailable.']; }
+        if (($response['status'] ?? -1) === 6) { return ['state' => 'not_found']; }
+        if (($response['status'] ?? -1) !== 0) { return ['state' => 'unavailable', 'message' => 'Block data is temporarily unavailable.']; }
         $payload = (string) ($response['payload'] ?? '');
-        if (!hash_equals($blockId, $this->blockId($payload))) {
-            return [
-                'state' => 'unavailable',
-                'message' => 'Indexed block no longer matches accepted Chain state.',
-            ];
-        }
-
-        return [
-            'state' => 'found',
-            'block' => $this->decodeBlock($payload),
-        ];
+        if (!hash_equals($blockId, $this->blockId($payload))) { return ['state' => 'unavailable', 'message' => 'Indexed block no longer matches accepted Chain state.']; }
+        return ['state' => 'found', 'block' => $this->decodeBlock($payload)];
     }
 
     private function stncClient(): stnc_client
@@ -174,6 +160,22 @@ final class explorer_model extends model
     {
         if (strlen($canonicalBlock) < 168 || substr($canonicalBlock, 0, 4) !== 'STNB') { throw new RuntimeException('Malformed canonical block.'); }
         return hash('sha256', "STN-CHAIN:BLOCK:ID:1\0" . substr($canonicalBlock, 0, 168));
+    }
+
+    private function blockTransactions(string $bytes): array
+    {
+        if (strlen($bytes) < 168 || substr($bytes, 0, 4) !== 'STNB') { throw new RuntimeException('Malformed canonical block.'); }
+        $fields = unpack('Ncount/Nbody', substr($bytes, 160, 8)); if (!is_array($fields)) { throw new RuntimeException('Malformed canonical block.'); }
+        $count = (int) $fields['count']; $offset = 168; $transactions = [];
+        for ($i = 0; $i < $count; ++$i) {
+            if ($offset + 4 > strlen($bytes)) { throw new RuntimeException('Malformed transaction body.'); }
+            $lengthField = unpack('Nlength', substr($bytes, $offset, 4)); $offset += 4; $length = is_array($lengthField) ? (int) $lengthField['length'] : -1;
+            if ($length < 12 || $offset + $length > strlen($bytes)) { throw new RuntimeException('Malformed transaction body.'); }
+            $transaction = substr($bytes, $offset, $length); if (substr($transaction, 0, 4) !== 'STNT') { throw new RuntimeException('Malformed transaction.'); }
+            $transactions[] = $transaction; $offset += $length;
+        }
+        if ($offset !== strlen($bytes)) { throw new RuntimeException('Malformed transaction body length.'); }
+        return $transactions;
     }
 
     private function decodeBlock(string $bytes): array
