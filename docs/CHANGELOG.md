@@ -9,6 +9,7 @@
 - Block synchronization now derives canonical transaction IDs from accepted block bodies and records block height, block ID, position, and transaction type in the Explorer-owned index.
 - Added the 1.1.0-to-1.2.0 Explorer database migration and declared both transaction views/routes in module metadata.
 - Public transaction listing remains local-only; page rendering does not initiate Chain history synchronization.
+- Added the public `Completed Contracts` Explorer metric surface. The metric fails closed and displays `Unavailable` until Explorer can obtain an authoritative total of contracts whose accepted Chain state is exactly `COMPLETE`; it does not reinterpret EXECUTED, CLOSED, other terminal states, transaction activity, or locally inferred state as completion.
 - STN Chain, STN-Stratum, and Chaos MVC Core were not modified by this Explorer increment.
 
 ### ChAoS lifecycle correction
